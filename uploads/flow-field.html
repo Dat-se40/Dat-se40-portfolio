@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>Flow Field Generator</title>
+<style>
+  body {
+    margin: 0;
+    background: #05060a;
+    color: #cfcfcf;
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px;
+  }
+  #controls {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  button {
+    background: #1a1c22;
+    color: #e0b458;
+    border: 1px solid #444;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  button:hover { background: #26282f; }
+  label { font-size: 13px; color: #999; }
+  #holder {
+    background: #0a0c10;
+    border-radius: 12px;
+    overflow: hidden;
+    line-height: 0;
+    max-width: 1200px;
+    width: 100%;
+  }
+</style>
+</head>
+<body>
+
+<div id="controls">
+  <button id="regen">Tạo lại ↻</button>
+  <button id="save">Lưu ảnh (PNG)</button>
+  <label>Độ nhiễu (noise scale)
+    <input type="range" id="nscale" min="1" max="10" value="4" step="1">
+  </label>
+  <label>Mật độ nét
+    <input type="range" id="density" min="1000" max="6000" value="3000" step="500">
+  </label>
+</div>
+
+<div id="holder"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+<script>
+let sketch = function (p) {
+  let seed;
+  let nscale, density;
+
+  function readControls() {
+    nscale = parseInt(document.getElementById('nscale').value) / 1000;
+    density = parseInt(document.getElementById('density').value);
+  }
+
+  p.setup = function () {
+    const holder = document.getElementById('holder');
+    const w = Math.min(holder.clientWidth || 1200, 1200);
+    const cnv = p.createCanvas(w, w * 0.58);
+    cnv.parent('holder');
+    readControls();
+    p.pixelDensity(2);
+    generate();
+  };
+
+  function generate() {
+    seed = Math.floor(Math.random() * 100000);
+    p.noiseSeed(seed);
+    p.randomSeed(seed);
+    p.background(8, 10, 14);
+    p.noFill();
+
+    // Vài "điểm xoáy" (vortex) tạo các vòng cuộn rõ nét như trong tranh gốc
+    const vortexCount = 2 + Math.floor(p.random(3));
+    const vortices = [];
+    for (let i = 0; i < vortexCount; i++) {
+      vortices.push({
+        x: p.random(p.width),
+        y: p.random(p.height),
+        r: p.random(120, 320),
+        s: p.random(-1, 1) // chiều xoáy + cường độ
+      });
+    }
+
+    // Hướng dòng chảy tại 1 điểm = trộn giữa Perlin noise và ảnh hưởng vortex gần đó
+    function fieldAngle(x, y) {
+      let n = p.noise(x * nscale, y * nscale) * p.TWO_PI * 2.2;
+      let dx = 0, dy = 0;
+      for (const v of vortices) {
+        const ddx = x - v.x, ddy = y - v.y;
+        const d2 = ddx * ddx + ddy * ddy + 1;
+        const falloff = (v.r * v.r) / d2;
+        dx += -ddy * v.s * falloff * 0.0025;
+        dy += ddx * v.s * falloff * 0.0025;
+      }
+      const vAngle = Math.atan2(dy, dx);
+      const vMag = Math.min(1, Math.sqrt(dx * dx + dy * dy));
+      return n * (1 - vMag) + vAngle * vMag;
+    }
+
+    const gold = [
+      p.color(201, 154, 63),
+      p.color(224, 180, 88),
+      p.color(143, 113, 48),
+      p.color(180, 140, 70)
+    ];
+    const dark = [
+      p.color(20, 26, 38),
+      p.color(12, 15, 22),
+      p.color(60, 68, 84),
+      p.color(30, 36, 50)
+    ];
+
+    const strokeCount = density;
+    for (let i = 0; i < strokeCount; i++) {
+      let x = p.random(p.width);
+      let y = p.random(p.height);
+      const isGold = p.random() < 0.55;
+      const palette = isGold ? gold : dark;
+      const col = palette[Math.floor(p.random(palette.length))];
+      const len = p.random(15, 55);
+      const weight = isGold ? p.random(1, 3) : p.random(0.8, 2.2);
+      const alpha = isGold ? p.random(90, 170) : p.random(70, 150);
+
+      p.strokeWeight(weight);
+      p.stroke(p.red(col), p.green(col), p.blue(col), alpha);
+
+      let angle = fieldAngle(x, y);
+      p.beginShape();
+      p.curveVertex(x, y);
+      for (let s = 0; s < len; s++) {
+        const target = fieldAngle(x, y);
+        angle = angle * 0.82 + target * 0.18; // làm mượt hướng đi, tránh gãy khúc
+        x += Math.cos(angle) * 2.2;
+        y += Math.sin(angle) * 2.2;
+        p.curveVertex(x, y);
+        if (x < -20 || x > p.width + 20 || y < -20 || y > p.height + 20) break;
+      }
+      p.endShape();
+    }
+  }
+
+  p.draw = function () {
+    p.noLoop();
+  };
+
+  window.regenerateFlowField = function () {
+    readControls();
+    generate();
+  };
+
+  window.saveFlowField = function () {
+    p.saveCanvas('flow-field', 'png');
+  };
+};
+
+new p5(sketch);
+
+document.getElementById('regen').addEventListener('click', () => {
+  window.regenerateFlowField && window.regenerateFlowField();
+});
+document.getElementById('nscale').addEventListener('change', () => {
+  window.regenerateFlowField && window.regenerateFlowField();
+});
+document.getElementById('density').addEventListener('change', () => {
+  window.regenerateFlowField && window.regenerateFlowField();
+});
+document.getElementById('save').addEventListener('click', () => {
+  window.saveFlowField && window.saveFlowField();
+});
+</script>
+
+</body>
+</html>
